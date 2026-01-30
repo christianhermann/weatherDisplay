@@ -88,18 +88,26 @@ def parse_current_to_point(payload: dict) -> WeatherPoint:
 def pick_target_forecasts(payload: dict) -> list[WeatherPoint]:
     """
     From /weather response, pick exactly:
+    - today 06:00, today 14:00  <-- Added this
     - tomorrow 06:00, tomorrow 14:00
     - day after tomorrow 06:00, day after tomorrow 14:00
-    using Europe/Berlin time (tz parameter requested). [web:43]
+    using Europe/Berlin time (tz parameter requested).
     """
     tz = ZoneInfo(TZ_NAME)
     now_local = datetime.now(timezone.utc).astimezone(tz)
-    tomorrow = now_local.date() + timedelta(days=1)
-    day_after = now_local.date() + timedelta(days=2)
+    
+    today = now_local.date()
+    tomorrow = today + timedelta(days=1)
+    day_after = today + timedelta(days=2)
 
     targets = {
+        # Today
+        datetime.combine(today, time(6, 0), tzinfo=tz),
+        datetime.combine(today, time(14, 0), tzinfo=tz),
+        # Tomorrow
         datetime.combine(tomorrow, time(6, 0), tzinfo=tz),
         datetime.combine(tomorrow, time(14, 0), tzinfo=tz),
+        # Day After
         datetime.combine(day_after, time(6, 0), tzinfo=tz),
         datetime.combine(day_after, time(14, 0), tzinfo=tz),
     }
@@ -127,3 +135,4 @@ def pick_target_forecasts(payload: dict) -> list[WeatherPoint]:
 
     out.sort(key=lambda p: p.timestamp)
     return out
+

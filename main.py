@@ -31,7 +31,7 @@ def main():
     forecasts = pick_target_forecasts(forecast_payload)
 
     if not forecasts:
-        print("\nForecast\n  Did not find the four target timestamps (06:00/14:00 for next two days).")
+        print("\nForecast\n  Did not find the six target timestamps (06:00/14:00 for next two days).")
         return
 
     for p in forecasts:
