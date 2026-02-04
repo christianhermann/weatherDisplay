@@ -1,44 +1,64 @@
 #include <Arduino.h>
-#include <WiFi.h>
-#include "time.h"
+#include <epd_driver.h>
+#define LILYGO_T5_47_S3 
+ // The EPD driver
 
-const char* WIFI_SSID = "Pretty fly for a Wifi";
-const char* WIFI_PASS = "giveittomebaby";
+// Declare the external UI function (defined in ui_layout.cpp)
+extern void updateUI();
 
-// CET/CEST rules for Europe/Berlin (POSIX TZ string)
-static const char* TZ_INFO = "CET-1CEST,M3.5.0/02:00:00,M10.5.0/03:00:00";
-static const char* NTP_SERVER = "pool.ntp.org";
+
+
+
+#include <Arduino.h>
+#include <epd_driver.h>
+
+// Force external declaration to debug linking
+uint8_t *framebuffer = NULL;
 
 void setup() {
-  Serial.begin(115200);
-  delay(500);
+    Serial.begin(115200);
+    delay(2000);
 
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(250);
-    Serial.print(".");
-  }
-  Serial.println("\nWiFi connected");
+    // 1. Init PSRAM
+    if (!psramInit()) {
+        Serial.println("PSRAM Init Failed");
+        while(1);
+    }
 
-  // Sets timezone + starts SNTP time sync
-  configTzTime(TZ_INFO, NTP_SERVER);  // common ESP32 Arduino approach [web:180]
+    // 2. Allocate Framebuffer
+    // EPD_WIDTH (960) * EPD_HEIGHT (540) / 2 = 259,200 bytes
+    framebuffer = (uint8_t *)ps_calloc(sizeof(uint8_t), EPD_WIDTH * EPD_HEIGHT / 2);
+    if (!framebuffer) {
+        Serial.println("Alloc memory failed !!!");
+        while (1);
+    }
+    // Initialize to White (0xFF = White in this 4bpp mode usually, or 0x00? Check demo)
+    // Usually 0xFF is White for EPD.
+    memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
 
-  // Wait up to 10 seconds for time to be set
-  struct tm timeinfo;
-  if (!getLocalTime(&timeinfo, 10000)) {
-    Serial.println("Failed to obtain time");
-    return;
-  }
+    // 2. Init EPD
+    epd_init();
 
- // Serial.println("Time synced!");
- // Serial.println(&timeinfo, "%Y-%m-%d %H:%M:%S");
+    // 3. CRITICAL CHECK: Is the global framebuffer actually set?
+    if (framebuffer == NULL) {
+        Serial.println("!! FRAMEBUFFER IS NULL !!");
+        // This confirms the linker is using a different variable instance
+    } else {
+        Serial.printf("Framebuffer Address: %p\n", framebuffer);
+    }
+
+    // 4. Power on and Clear
+    epd_poweron();
+    epd_clear();
+    epd_poweroff();
+
+    // 5. Run UI
+    updateUI();
 }
 
+
+
 void loop() {
- // struct tm timeinfo;
- // if (getLocalTime(&timeinfo)) {
-   // Serial.println(&timeinfo, "%Y-%m-%d %H:%M:%S");
- // }
- // delay(1000);
+    // Nothing here! 
+    // E-Ink displays should update once and then sleep.
 }
