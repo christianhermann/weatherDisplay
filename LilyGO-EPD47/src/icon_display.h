@@ -2,22 +2,33 @@
 #define ICON_DISPLAY_H
 
 #include <Arduino.h>
-#include <string.h>
-#include "weather_icons.h"
+#include "weather_icons.h" // Your new file
 
-// Lookup raw icon data by Bright Sky icon string (e.g. "clear-day").
-static inline const uint8_t* getIconData(const char* icon_name) {
-  if (!icon_name) return nullptr;
-  for (int i = 0; i < WEATHER_ICONS_COUNT; i++) {
-    if (strcmp(WEATHER_ICONS[i].name, icon_name) == 0) return WEATHER_ICONS[i].data;
-  }
-  return nullptr;
+// Helper struct to map string -> data
+struct IconMap {
+    const char* name;
+    const uint8_t* data;
+};
+
+// Map the API strings to your NEW variable names (from weather_icons.h)
+const IconMap ICONS[] = {
+    {"clear-day",       clear_day_map},
+    {"clear-night",     clear_night_map}, // Check your header for exact names!
+    {"rain",            rain_day_map},
+    {"cloudy",          partly_cloudy_day_map},
+    // ... Add all other icons here ...
+    {NULL, NULL}
+};
+
+// Helper function to find icon data by name
+const uint8_t* getIconData(const char* name) {
+    if (!name) return NULL;
+    for (int i = 0; ICONS[i].name != NULL; i++) {
+        if (strcmp(ICONS[i].name, name) == 0) {
+            return ICONS[i].data;
+        }
+    }
+    return NULL; // Not found
 }
 
-// Debug helper to list all available icon names
-static inline void printAvailableIcons() {
-  Serial.println("Available weather icons:");
-  for (int i = 0; i < WEATHER_ICONS_COUNT; i++) Serial.println(WEATHER_ICONS[i].name);
-}
-
-#endif // ICON_DISPLAY_H
+#endif
