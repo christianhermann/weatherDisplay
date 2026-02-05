@@ -1,19 +1,57 @@
 #include <Arduino.h>
 #include <epd_driver.h>
+#include "network_management.h"
 #define LILYGO_T5_47_S3 
- // The EPD driver
+#define SLEEP_MINUTES 100
 
 // Declare the external UI function (defined in ui_layout.cpp)
-extern void updateUI();
-
-
-
-
-#include <Arduino.h>
-#include <epd_driver.h>
+extern void updateUI(WeatherData data); 
 
 // Force external declaration to debug linking
 uint8_t *framebuffer = NULL;
+
+// ---------------------------------------------------------
+// HELPER: DEBUG PRINT
+// ---------------------------------------------------------
+void printWeatherDebug(WeatherData data) {
+    Serial.println("\n--------------------------------------");
+    Serial.println("       WEATHER DATA REPORT");
+    Serial.println("--------------------------------------");
+    
+    if (!data.valid) {
+        Serial.println("[ERROR] Data is INVALID/Empty.");
+        return;
+    }
+
+    Serial.printf("Data Update TS: %s\n", data.update_ts);
+    
+    Serial.println("\n--- CURRENT CONDITIONS ---");
+    Serial.printf("Time:     %s\n", data.current.timestamp);
+    Serial.printf("Temp:     %.1f C\n", data.current.temp);
+    Serial.printf("Rain:     %d %%\n", data.current.rainPct);
+    Serial.printf("Humidity: %d %%\n", data.current.humidity);
+    Serial.printf("Wind:     %.1f km/h\n", data.current.windSpeed);
+    Serial.printf("Cloud:    %d %%\n", data.current.cloudCover);
+    Serial.printf("Icon:     %s\n", data.current.icon);
+
+    Serial.println("\n--- FORECAST ---");
+    Serial.printf("Items parsed: %d\n", data.forecastCount);
+    
+    for(int i=0; i<data.forecastCount; i++) {
+        WeatherPoint p = data.forecast[i];
+        Serial.printf("[%d] %s | T: %.1fC | Rain: %d%% | Wind: %.1f | Icon: %s | Cloud: %d%%\n", 
+            i, 
+            p.timestamp, 
+            p.temp, 
+            p.rainPct, 
+            p.windSpeed, 
+            p.icon,
+            p.cloudCover
+        );
+    }
+    Serial.println("--------------------------------------\n");
+}
+
 
 void setup() {
     Serial.begin(115200);
@@ -46,14 +84,39 @@ void setup() {
     } else {
         Serial.printf("Framebuffer Address: %p\n", framebuffer);
     }
+// 2. Fetch Weather Data
+    // This will connect WiFi, get MQTT, parse JSON, and disconnect WiFi
+    Serial.println("Fetching weather data...");
+    WeatherData weather = fetchWeatherData();
 
-    // 4. Power on and Clear
-    epd_poweron();
-    epd_clear();
-    epd_poweroff();
+    // 3. Print Results to Serial (Verification Step)
+    printWeatherDebug(weather);
+
+
+
 
     // 5. Run UI
-    updateUI();
+    updateUI(weather);
+    
+
+    // --- DEEP SLEEP SEQUENCE ---
+    Serial.println(" shutting down...");
+    
+    // A. Ensure EPD is off (Double check)
+    epd_poweroff(); 
+    
+    // B. Delay slightly to let serial finish (optional)
+    delay(100);
+
+    // C. Configure Timer Wakeup
+    // Time in Microseconds = Minutes * 60 * 1,000,000
+    uint64_t sleep_us = (uint64_t)SLEEP_MINUTES * 60 * 1000000;
+   // esp_sleep_enable_timer_wakeup(sleep_us);
+
+    // D. Enter Deep Sleep
+    // The ESP32 will largely power off. RAM is lost (except RTC RAM).
+    // When it wakes, it resets and runs setup() from the start.
+   // esp_deep_sleep_start();
 }
 
 

@@ -38,7 +38,7 @@ def _format_point(wp: WeatherPoint) -> dict:
         "temp": round(wp.temperature_c) if wp.temperature_c is not None else None,
         
         # Precipitation Probability (e.g., 50)
-        "rain_pct": round(wp.precipitation_probability_pct) if wp.precipitation_probability_pct is not None else None,
+        "rain": round(wp.precipitation) if wp.precipitation is not None else None,
         
         # Cloud Cover Percentage(e. g. 35)
         "cloudco" : round (wp.cloud_cover_pct) if wp.cloud_cover_pct is not None else None,

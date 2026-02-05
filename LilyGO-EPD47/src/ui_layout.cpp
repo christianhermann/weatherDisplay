@@ -3,9 +3,11 @@
 #include "icon_display.h"
 #include "stdio.h"
 #include <HardwareSerial.h>
+#include "network_management.h"
 
 // FONTS
 #include "FiraSans.h" // Assuming this is your main font (approx 12-16pt?)
+#include "opensans8b.h"
 #include "opensans10b.h"
 #include "digits_48pt.h" // Custom large numbers
 
@@ -44,11 +46,47 @@
 #define BOX_LIST_Y      120  // Start Y
 #define BOX_LIST_GAP    37   // Gap between lines
 
+#define BATTERY_PIN 14 
 
 // Reference the global variable from main.cpp
 extern uint8_t *framebuffer; 
 
+
+
 // --- HELPER FUNCTIONS ---
+void drawBattery() {
+    // 1. Read Voltage
+    analogSetAttenuation(ADC_11db);
+    pinMode(BATTERY_PIN, ANALOG);
+    
+    uint32_t raw = 0;
+    for(int i=0; i<20; i++) {
+        raw += analogRead(BATTERY_PIN);
+    }
+    raw /= 20;
+
+    float voltage = (raw / 4095.0) * 3.3 * 2.0; // Voltage divider adjustment
+    int percentage = 0;
+    if (voltage > 4.2) percentage = 100;
+    else if (voltage < 3.3) percentage = 0;
+    else percentage = (int)((voltage - 3.3) / (4.2 - 3.3) * 100.0);
+
+    // 2. Format Text
+    char buf[8];
+    sprintf(buf, "%d%%", percentage); // e.g., "85%"
+
+    // 3. Calculate Position (Top Right)
+    // Screen Width is 960.
+    // "100%" in size 8 font is roughly 30-35 pixels wide.
+    int cursor_x = SCREEN_W - 45; // Start 45px from right edge
+    int cursor_y = 25;       // ~15px from top (baseline of text)
+
+    // 4. Draw to Framebuffer
+    // writeln(font, text, &x, &y, buffer)
+    writeln((GFXfont *)&OpenSans8B, buf, &cursor_x, &cursor_y, framebuffer);
+    
+    Serial.printf("Battery drawn: %s (%.2fV)\n", buf, voltage);
+}
 
 // Draw text with default properties
 void drawTextHelper(int x, int y, const char *text, const GFXfont *font) {
@@ -125,6 +163,52 @@ void drawIcon128(int x, int y, const uint8_t *src_data) {
     }
 }
 
+
+// Returns pointer to "Mo.", "Di.", etc. based on YYYY, MM, DD
+const char* getDayOfWeek(int year, int month, int day) {
+    // Zeller's Congruence adjustment for Jan/Feb
+    if (month < 3) {
+        month += 12;
+        year -= 1;
+    }
+    
+    int k = year % 100;
+    int j = year / 100;
+    
+    // Formula for ISO Day (1=Mon, ... 7=Sun) is slightly different, 
+    // but standard Zeller gives: 0=Sat, 1=Sun, 2=Mon, ... 6=Fri
+    int h = (day + 13 * (month + 1) / 5 + k + k / 4 + j / 4 + 5 * j) % 7;
+    
+    // Map Zeller output (0=Sat) to German Short strings
+    switch (h) {
+        case 0: return "Sa.";
+        case 1: return "So.";
+        case 2: return "Mo.";
+        case 3: return "Di.";
+        case 4: return "Mi.";
+        case 5: return "Do.";
+        case 6: return "Fr.";
+    }
+    return "??";
+}
+
+// Wrapper to parse "YYYY-MM-DD" string
+const char* getDayFromString(const char* isoDate) {
+    // Expected format: "2026-02-01..."
+    // We can use sscanf or atoi with offsets
+    
+    // Simple parsing (Ascii to Int)
+    // "2026"
+    int y = (isoDate[0] - '0') * 1000 + (isoDate[1] - '0') * 100 + (isoDate[2] - '0') * 10 + (isoDate[3] - '0');
+    // "02"
+    int m = (isoDate[5] - '0') * 10 + (isoDate[6] - '0');
+    // "01"
+    int d = (isoDate[8] - '0') * 10 + (isoDate[9] - '0');
+
+    return getDayOfWeek(y, m, d);
+}
+
+
 // --- CORE DRAWING FUNCTIONS ---
 
 void drawForecastGridLines() {
@@ -188,42 +272,108 @@ void drawLeftPanel(const char* iconName, int temp, const char* wind, const char*
     drawTextHelper(listX, 500, timeStr, &FiraSans);
 }
 
+void updateUI(WeatherData data) {
+    // 1. Clear Framebuffer to White
+    memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
 
-void updateUI() {
-    // 1. Clear/Lines
+    // 2. Draw Static Lines
     drawForecastGridLines();
 
-    // 2. Draw Left Panel (Current)
-    drawLeftPanel("clear-day", 37, 
-                  "17 km/h Wind", "17% r.F.", "25% bewölkt", "17% Regen", 
-                  "13:00      17.01.2026");
+    // 3. Draw Battery (Helper from ui_layout.cpp)
+    drawBattery();
 
-    // 3. Draw Right Grid (Forecast)
-    int col1 = LEFT_PANEL_W;
-    int col2 = LEFT_PANEL_W + GRID_BOX_W;
-    int row1 = 0;
-    int row2 = GRID_BOX_H;
+    if (!data.valid) {
+        drawTextHelper(50, 200, "Waiting for Data...", &FiraSans);
+        // We still flush so the user sees the error/waiting message
+    } else {
+        // --- PREPARE LEFT PANEL STRINGS ---
+        char windStr[32], humStr[32], cloudStr[32], rainStr[32], dateStr[64];
+        
+        sprintf(windStr, "%.0f km/h Wind", data.current.windSpeed);
+        sprintf(humStr, "%d%% r.F.", data.current.humidity);
+        sprintf(cloudStr, "%d%% bewölkt", data.current.cloudCover);
+        
+        if (data.current.rainPct >= 0) sprintf(rainStr, "%d%% Regen", data.current.rainPct);
+        else strcpy(rainStr, "");
 
-    // Box 1 (Top Left)
-    drawForecastBox(col1, row1, "clear-day", "Mo. 6:00", "12°C",
-                    "17 km/h Wind", "17% r.F.", "25% bewölkt", "17% Regen");
+        // Format Date: "HH:MM      DD.MM.YYYY"
+        // Input: "2026-02-01T15:30:00+01:00"
+        // We can cheat slightly and just parse pointers if format is strict, 
+        // or use strptime if available. For now, manual mapping:
+        if (strlen(data.current.timestamp) >= 16) {
+            // timestamp: 0123-56-89T11:34
+            const char* t = data.current.timestamp;
+            sprintf(dateStr, "%.5s      %.2s.%.2s.%.4s", 
+                t + 11, // HH:MM
+                t + 8,  // DD
+                t + 5,  // MM
+                t + 0   // YYYY
+            );
+        } else {
+            strcpy(dateStr, "Unknown Date");
+        }
 
-    // Box 2 (Top Right)
-    drawForecastBox(col2, row1, "clear-day", "Mo. 14:00", "12°C",
-                    "17 km/h Wind", "17% r.F.", "25% bewölkt", "17% Regen");
+        // --- CALL LEFT PANEL HELPER ---
+        drawLeftPanel(
+            data.current.icon, 
+            (int)data.current.temp, 
+            windStr, 
+            humStr, 
+            cloudStr, 
+            rainStr, 
+            dateStr
+        );
 
-    // Box 3 (Bottom Left)
-    drawForecastBox(col1, row2, "clear-day", "Di. 6:00", "12°C",
-                    "17 km/h Wind", "17% r.F.", "25% bewölkt", "17% Regen");
+        // --- CALL RIGHT GRID LOOP ---
+        int boxesToDraw = (data.forecastCount > 4) ? 4 : data.forecastCount;
 
-    // Box 4 (Bottom Right)
-    drawForecastBox(col2, row2, "clear-day", "Di. 14:00", "12°C",
-                    "17 km/h Wind", "17% r.F.", "25% bewölkt", "17% Regen");
+        for (int i = 0; i < boxesToDraw; i++) {
+            int gridCol = i % 2; 
+            int gridRow = i / 2;
+            
+            int boxX = LEFT_PANEL_W + (gridCol * GRID_BOX_W);
+            int boxY = (gridRow * GRID_BOX_H);
+
+            // Prepare Forecast Strings
+            char f_date[32], f_temp[16], f_wind[32], f_hum[32], f_cloud[32], f_rain[32];
+                        
+            // Format: "Mo. 14:00"
+            if (strlen(data.forecast[i].timestamp) >= 16) {
+                const char* dayStr = getDayFromString(data.forecast[i].timestamp);
+                
+                sprintf(f_date, "%s %.5s", 
+                    dayStr,                         // "Mo."
+                    data.forecast[i].timestamp + 11 // "14:00"
+                );
+            } else {
+                strcpy(f_date, "??:??");
+            }
+
+
+            sprintf(f_temp, "%.0f°C", data.forecast[i].temp);
+            sprintf(f_wind, "%.0f km/h", data.forecast[i].windSpeed); // Shortened "Wind" to fit box?
+            sprintf(f_hum, "%d%% r.F.", data.forecast[i].humidity);
+            sprintf(f_cloud, "%d%%", data.forecast[i].cloudCover);
+            
+            if (data.forecast[i].rainPct > 0) sprintf(f_rain, "%d%% Regen", data.forecast[i].rainPct);
+            else strcpy(f_rain, "");
+
+            drawForecastBox(
+                boxX, boxY, 
+                data.forecast[i].icon, 
+                f_date, 
+                f_temp, 
+                f_wind, f_hum, f_cloud, f_rain
+            );
+        }
+    }
 
     // 4. Flush to Screen
     Serial.println("Updating Display...");
     epd_poweron();
+    epd_clear(); // Optional: Clear ghosting
     epd_draw_grayscale_image(epd_full_screen(), framebuffer);
     epd_poweroff();
     Serial.println("Display Update Done.");
 }
+
