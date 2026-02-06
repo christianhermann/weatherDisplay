@@ -37,17 +37,22 @@ def _format_point(wp: WeatherPoint) -> dict:
         # Rounded Temp (e.g., 22.4 -> 22)
         "temp": round(wp.temperature_c) if wp.temperature_c is not None else None,
         
-        # Precipitation Probability (e.g., 50)
-        "rain": round(wp.precipitation) if wp.precipitation is not None else None,
+        # Precipitation
+        "rain": wp.precipitation if wp.precipitation is not None else None,
         
+        # Precipitation Probability (e.g., 50)
+        "rain_probability": round(wp.precipitation_probability) if wp.precipitation_probability is not None else None,
+
         # Cloud Cover Percentage(e. g. 35)
         "cloudco" : round (wp.cloud_cover_pct) if wp.cloud_cover_pct is not None else None,
 
         # Wind Speed (e.g., 15 km/h)
         "wind": round(wp.wind_speed_ms * 3.6, 1) if wp.wind_speed_ms is not None else None,
-        
-        # Humidity (e.g., 45%) - Great for "Comfort" metrics on display
-        "humi": round(wp.relative_humidity_pct) if wp.relative_humidity_pct is not None else None,
+
+        "wind60": round(wp.wind_speed_60_ms * 3.6, 1) if wp.wind_speed_60_ms is not None else None,
+
+        # Dew point (e.g., 12°C) - Great for "Comfort" metrics on display
+        "dew_point":round(wp.dew_point) if wp.dew_point is not None else None,
 
                 # Icon string (e.g., "partly-cloudy-day")
         "icon": wp.icon

@@ -17,9 +17,11 @@ class WeatherPoint:
     temperature_c: float | None
     cloud_cover_pct: float | None
     precipitation: float | None
+    precipitation_probability: float | None
     sunshine_duration_min: float | None
     wind_speed_ms: float | None
-    relative_humidity_pct: float | None
+    wind_speed_60_ms: float | None
+    dew_point: float | None
     icon: str | None
 
 
@@ -78,9 +80,11 @@ def parse_current_to_point(payload: dict) -> WeatherPoint:
         temperature_c=w.get("temperature"),
         cloud_cover_pct=w.get("cloud_cover"),
         precipitation=w.get("precipitation_60"),
+        precipitation_probability=w.get("precipitation_probability"),
         sunshine_duration_min=w.get("sunshine"),
-        wind_speed_ms=w.get("wind_speed_60"),
-        relative_humidity_pct=w.get("relative_humidity"),
+        wind_speed_ms=w.get("wind_speed"),
+        wind_speed_60_ms=w.get("wind_speed_60"),
+        dew_point=w.get("dew_point"),
         icon=w.get("icon"),
     )
 
@@ -125,10 +129,12 @@ def pick_target_forecasts(payload: dict) -> list[WeatherPoint]:
                     timestamp=ts,
                     temperature_c=w.get("temperature"),
                     cloud_cover_pct=w.get("cloud_cover"),
-                    precipitation=w.get("precipitation"),
+                    precipitation=w.get("precipitation_60"),
+                    precipitation_probability=w.get("precipitation_probability"),
                     sunshine_duration_min=w.get("sunshine"),
                     wind_speed_ms=w.get("wind_speed"),
-                    relative_humidity_pct=w.get("relative_humidity"),
+                    wind_speed_60_ms=w.get("wind_speed_60"),
+                    dew_point=w.get("dew_point"),
                     icon=w.get("icon"),
                 )
             )
