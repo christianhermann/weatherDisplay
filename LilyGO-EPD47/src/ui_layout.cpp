@@ -5,6 +5,7 @@
 #include "HardwareSerial.h"
 #include "network_management.h"
 #include "chrono"
+#include "Arduino.h"
 // FONTS
 #include "FiraSans.h" // Assuming this is your main font (approx 12-16pt?)
 #include "opensans8b.h"
@@ -219,6 +220,18 @@ void drawIcon128(int x, int y, const uint8_t *src_data)
     }
 }
 
+//  Parse Hour from ISO String "YYYY-MM-DDTHH:MM..."
+int getHourFromISO(const char *iso)
+{
+    if (strlen(iso) < 13)
+        return 0;
+    char hourStr[3];
+    hourStr[0] = iso[11];
+    hourStr[1] = iso[12];
+    hourStr[2] = '\0';
+    return atoi(hourStr);
+}
+
 // Returns pointer to "Mo.", "Di.", etc. based on YYYY, MM, DD
 const char *getDayOfWeek(int year, int month, int day)
 {
@@ -397,49 +410,46 @@ void updateUI(WeatherData data)
             dateStr);
 
         // --- CALL RIGHT GRID LOOP ---
-        int boxesToDraw = (data.forecastCount > 4) ? 4 : data.forecastCount;
+        // --- FORECAST GRID LOGIC (SMART WINDOW) ---
+        int currentHour = getHourFromISO(data.current.timestamp);
+        int startIndex = 0;
 
-        for (int i = 0; i < boxesToDraw; i++)
-        {
+        if (currentHour < 6) {
+            startIndex = 0; // Show Today 6:00, 14:00, Tmrw 6:00, 14:00
+        } else if (currentHour >= 6 && currentHour < 14) {
+            startIndex = 1; // Show Today 14:00, Tmrw 6:00, 14:00, DayAfter 6:00
+        } else {
+            startIndex = 2; // Show Tmrw 6:00, 14:00, DayAfter 6:00, 14:00
+        }
+
+        // Draw up to 4 boxes
+        for (int i = 0; i < 4; i++) {
+            int dataIndex = startIndex + i;
+            if (dataIndex >= data.forecastCount) break;
+
             int gridCol = i % 2;
             int gridRow = i / 2;
-
             int boxX = LEFT_PANEL_W + (gridCol * GRID_BOX_W);
             int boxY = (gridRow * GRID_BOX_H);
 
-            // Prepare Forecast Strings
             char f_date[32], f_temp[16], f_wind[32], f_dew[32], f_cloud[32], f_rain[32];
 
-            // Skip Box if its in the past
-            if (strncmp(data.forecast[i].timestamp, data.current.timestamp, 16) < 0)
-            {
-                continue;
-            }
-
-            // Format: "Mo. 14:00"
-            if (strlen(data.forecast[i].timestamp) >= 16)
-            {
-                const char *dayStr = getDayFromString(data.forecast[i].timestamp);
-
-                sprintf(f_date, "%s %.5s",
-                        dayStr,                         // "Mo."
-                        data.forecast[i].timestamp + 11 // "14:00"
-                );
-            }
-            else
-            {
+            if (strlen(data.forecast[dataIndex].timestamp) >= 16) {
+                const char *dayStr = getDayFromString(data.forecast[dataIndex].timestamp);
+                sprintf(f_date, "%s %.5s", dayStr, data.forecast[dataIndex].timestamp + 11);
+            } else {
                 strcpy(f_date, "??:??");
             }
 
-            sprintf(f_temp, "%.0f°C", data.forecast[i].temp);
-            sprintf(f_wind, "%.0f km/h Wind", data.forecast[i].windSpeed); // Shortened "Wind" to fit box?
-            sprintf(f_dew, "%.0f°C Taupunkt", data.forecast[i].dew_point);
-            sprintf(f_cloud, "%d%% bewölkt", data.forecast[i].cloudCover);
-            sprintf(f_rain, "%d %% Regen", data.forecast[i].rain_probability);
+            sprintf(f_temp, "%.0f°C", data.forecast[dataIndex].temp);
+            sprintf(f_wind, "%.0f km/h Wind", data.forecast[dataIndex].windSpeed); // Shortened "Wind" to fit box?
+            sprintf(f_dew, "%.0f°C Taupunkt", data.forecast[dataIndex].dew_point);
+            sprintf(f_cloud, "%d%% bewölkt", data.forecast[dataIndex].cloudCover);
+            sprintf(f_rain, "%d %% Regen", data.forecast[dataIndex].rain_probability);
 
             drawForecastBox(
                 boxX, boxY,
-                data.forecast[i].icon,
+                data.forecast[dataIndex].icon,
                 f_date,
                 f_temp,
                 f_wind,
