@@ -2,7 +2,7 @@
 #include <epd_driver.h>
 #include "network_management.h"
 #define LILYGO_T5_47_S3
-#define SLEEP_MINUTES 1
+#define SLEEP_MINUTES 60
 
 // Declare the external UI function (defined in ui_layout.cpp)
 extern void updateUI(WeatherData data);
