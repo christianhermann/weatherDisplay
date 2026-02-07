@@ -12,7 +12,7 @@ A high-contrast, low-power weather dashboard built on the **LilyGo T5-4.7 S3** E
 *   **Deep Sleep Architecture:**
     *   **Active time:** ~5 seconds per update
     *   **Sleep current:** ~20µA
-    *   **Battery Life:** In theory about a year on a 2000mAh LiPo
+    *   **Battery Life:** Pretty long
 *   **Smart Forecast Window:**
     *   **Morning (< 6:00):** Shows today's 6:00, 14:00 & tomorrow's forecasts
     *   **Day (6:00-14:00):** Shows today's 14:00 & full tomorrow
