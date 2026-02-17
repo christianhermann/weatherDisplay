@@ -19,8 +19,8 @@ class WeatherPoint:
     precipitation: float | None
     precipitation_probability: float | None
     sunshine_duration_min: float | None
-    wind_speed_ms: float | None
-    wind_speed_60_ms: float | None
+    wind_speed: float | None
+    wind_speed_60: float | None
     dew_point: float | None
     icon: str | None
 
@@ -82,8 +82,8 @@ def parse_current_to_point(payload: dict) -> WeatherPoint:
         precipitation=w.get("precipitation_60"),
         precipitation_probability=w.get("precipitation_probability"),
         sunshine_duration_min=w.get("sunshine"),
-        wind_speed_ms=w.get("wind_speed"),
-        wind_speed_60_ms=w.get("wind_speed_60"),
+        wind_speed=w.get("wind_speed"),
+        wind_speed_60=w.get("wind_speed_60"),
         dew_point=w.get("dew_point"),
         icon=w.get("icon"),
     )
@@ -132,8 +132,8 @@ def pick_target_forecasts(payload: dict) -> list[WeatherPoint]:
                     precipitation=w.get("precipitation_60"),
                     precipitation_probability=w.get("precipitation_probability"),
                     sunshine_duration_min=w.get("sunshine"),
-                    wind_speed_ms=w.get("wind_speed"),
-                    wind_speed_60_ms=w.get("wind_speed_60"),
+                    wind_speed=w.get("wind_speed"),
+                    wind_speed_60=w.get("wind_speed_60"),
                     dew_point=w.get("dew_point"),
                     icon=w.get("icon"),
                 )
