@@ -47,9 +47,9 @@ def _format_point(wp: WeatherPoint) -> dict:
         "cloudco" : round (wp.cloud_cover_pct) if wp.cloud_cover_pct is not None else None,
 
         # Wind Speed (e.g., 15 km/h)
-        "wind": round(wp.wind_speed * 3.6, 1) if wp.wind_speed is not None else None,
+        "wind": round(wp.wind_speed, 1) if wp.wind_speed is not None else None,
 
-        "wind60": round(wp.wind_speed_60 * 3.6, 1) if wp.wind_speed_60 is not None else None,
+        "wind60": round(wp.wind_speed_60, 1) if wp.wind_speed_60 is not None else None,
 
         # Dew point (e.g., 12°C) - Great for "Comfort" metrics on display
         "dew_point":round(wp.dew_point) if wp.dew_point is not None else None,
