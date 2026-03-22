@@ -218,8 +218,8 @@ WeatherData fetchWeatherData()
         // 3. Wait Loop
         DEBUG_NET.println(">> Waiting for message...");
         long start = millis();
-        while (millis() - start < 3000)
-        { // Increased to 3s
+        while (millis() - start < 1500)
+        { // Increased to 1.5s
             client.loop();
             if (messageReceived)
             {

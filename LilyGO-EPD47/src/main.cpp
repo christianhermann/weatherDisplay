@@ -58,9 +58,14 @@ void printWeatherDebug(WeatherData data)
 }
 
 void setup()
-{
+{   // 0. Set CPU Frequency to 80MHz (Default is 240MHz on ESP32-S3) to reduce power consumption. EPD updates are slow, so we don't need the extra speed.
+    setCpuFrequencyMhz(80); 
+    // Disable Bluetooth to free up memory and reduce power consumption
+    btStop();
+
+#ifndef DISABLE_SERIAL
     Serial.begin(115200);
-    delay(2000);
+#endif
 
     // 1. Init PSRAM
     if (!psramInit())
