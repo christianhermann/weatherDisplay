@@ -1,14 +1,38 @@
 #include <Arduino.h>
 #include <epd_driver.h>
-#include "network_management.h"
+#include <network_management.h>
 #define LILYGO_T5_47_S3
-#define SLEEP_MINUTES 60
+#define SLEEP_MINUTES_LONG 120
+#define SLEEP_MINUTES_SHORT 60
+
 
 // Declare the external UI function (defined in ui_layout.cpp)
 extern void updateUI(WeatherData data);
 
 // Force external declaration to debug linking
 uint8_t *framebuffer = NULL;
+
+// ---------------------------------------------------------
+// HELPER: GET ADAPTIVE SLEEP DURATION
+// ---------------------------------------------------------
+// Returns sleep duration in minutes based on current hour
+// Schedule:
+//   00:00 - 06:00: 120 minutes (sleep period)
+//   06:00 - 08:00: 60 minutes (wake-up)
+//   08:00 - 12:00: 120 minutes (mid-morning)
+//   12:00 - 24:00: 60 minutes (active)
+uint32_t getSleepDurationMinutes(int hour)
+{
+    if (hour >= 0 && hour < 6) {
+        return SLEEP_MINUTES_LONG;  // Midnight to 6 AM: 2 hours
+    } else if (hour >= 6 && hour < 8) {
+        return SLEEP_MINUTES_SHORT;   // 6 AM to 8 AM: 1 hour
+    } else if (hour >= 8 && hour < 12) {
+        return SLEEP_MINUTES_LONG;  // 8 AM to 12 PM: 2 hours
+    } else {
+        return SLEEP_MINUTES_SHORT;   // 12 PM to 24:00: 1 hour
+    }
+}
 
 // ---------------------------------------------------------
 // HELPER: DEBUG PRINT
@@ -107,7 +131,9 @@ void setup()
     WeatherData weather = fetchWeatherData();
 
     // 3. Print Results to Serial (Verification Step)
+#ifndef DISABLE_SERIAL
     printWeatherDebug(weather);
+#endif
 
     // 5. Run UI
     updateUI(weather);
@@ -119,11 +145,31 @@ void setup()
     epd_poweroff();
 
     // B. Delay slightly to let serial finish (optional)
-    delay(100);
+    delay(50);
 
-    // C. Configure Timer Wakeup
+    // C. Configure Timer Wakeup with adaptive interval
+    uint32_t sleep_minutes = SLEEP_MINUTES_SHORT;  // Default fallback
+    
+    // If we have valid weather data, calculate dynamic sleep interval based on current hour
+    if (weather.valid && strlen(weather.current.timestamp) >= 13)
+    {
+        // Extract hour from ISO timestamp (format: "2026-02-01T15:30:00+01:00")
+        char hourStr[3];
+        hourStr[0] = weather.current.timestamp[11];
+        hourStr[1] = weather.current.timestamp[12];
+        hourStr[2] = '\0';
+        int current_hour = atoi(hourStr);
+        
+        sleep_minutes = getSleepDurationMinutes(current_hour);
+        Serial.printf("Adaptive sleep: Hour %d -> Sleep %d minutes\n", current_hour, sleep_minutes);
+    }
+    else
+    {
+        Serial.printf("Using default sleep interval: %d minutes\n", SLEEP_MINUTES_SHORT);
+    }
+    
     // Time in Microseconds = Minutes * 60 * 1,000,000
-    uint64_t sleep_us = (uint64_t)SLEEP_MINUTES * 60 * 1000000;
+    uint64_t sleep_us = (uint64_t)sleep_minutes * 60 * 1000000;
     esp_sleep_enable_timer_wakeup(sleep_us);
 
     // D. Enter Deep Sleep

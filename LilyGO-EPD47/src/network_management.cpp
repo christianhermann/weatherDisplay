@@ -32,10 +32,12 @@ void connectWiFi()
     WiFi.begin(WIFI_SSID, WIFI_PASS);
 
     int retries = 0;
-    while (WiFi.status() != WL_CONNECTED && retries < 15)
+    int delay_ms = 250;
+    while (WiFi.status() != WL_CONNECTED && retries < 12)
     {
-        delay(500);
+        delay(delay_ms);
         Serial.print(".");
+        delay_ms = (int)fmin(delay_ms * 1.5, 1000);
         retries++;
     }
     Serial.println(WiFi.status() == WL_CONNECTED ? " OK" : " Failed");
@@ -218,15 +220,18 @@ WeatherData fetchWeatherData()
         // 3. Wait Loop
         DEBUG_NET.println(">> Waiting for message...");
         long start = millis();
-        while (millis() - start < 1500)
-        { // Increased to 1.5s
+        int timeout = 500;  // Reduced from 1500ms for faster power efficiency
+        int delay_interval = 5;  // Start with 5ms
+        while (millis() - start < timeout)
+        {
             client.loop();
             if (messageReceived)
             {
                 DEBUG_NET.println(">> Message flag set!");
                 break;
             }
-            delay(10);
+            delay(delay_interval);
+            delay_interval = (delay_interval < 50) ? delay_interval + 2 : 50;  // Gradual backoff
         }
 
         if (!messageReceived)

@@ -51,18 +51,19 @@
 extern uint8_t *framebuffer;
 
 // --- HELPER FUNCTIONS ---
-void drawBattery()
+// Get battery percentage (returns 0-100)
+int getBatteryPercentage()
 {
     // 1. Read Voltage
     analogSetAttenuation(ADC_11db);
     pinMode(BATTERY_PIN, ANALOG);
 
     uint32_t raw = 0;
-    for (int i = 0; i < 20; i++)
+    for (int i = 0; i < 8; i++)
     {
         raw += analogRead(BATTERY_PIN);
     }
-    raw /= 20;
+    raw /= 8;
 
     float voltage = (raw / 4095.0) * 3.3 * 2.0; // Voltage divider adjustment
     int percentage = 0;
@@ -73,21 +74,21 @@ void drawBattery()
     else
         percentage = (int)((voltage - 3.3) / (4.2 - 3.3) * 100.0);
 
+    return percentage;
+}
+
+void drawBattery(int battery_percentage)
+{
     // 2. Format Text
     char buf[8];
-    sprintf(buf, "%d%%", percentage); // e.g., "85%"
+    sprintf(buf, "%d%%", battery_percentage);
 
     // 3. Calculate Position (Top Right)
-    // Screen Width is 960.
-    // "100%" in size 8 font is roughly 30-35 pixels wide.
     int cursor_x = SCREEN_W - 45; // Start 45px from right edge
     int cursor_y = 25;            // ~15px from top (baseline of text)
 
     // 4. Draw to Framebuffer
-    // writeln(font, text, &x, &y, buffer)
     writeln((GFXfont *)&OpenSans8B, buf, &cursor_x, &cursor_y, framebuffer);
-
-    Serial.printf("Battery drawn: %s (%.2fV)\n", buf, voltage);
 }
 
 // Draw text with default properties
@@ -97,6 +98,48 @@ void drawTextHelper(int x, int y, const char *text, const GFXfont *font)
     int cursor_y = y;
     FontProperties props = {15, 0, 0}; // White BG, Black FG
     writeln((GFXfont *)font, (char *)text, &cursor_x, &cursor_y, framebuffer);
+}
+
+// Draw low battery warning screen
+void drawBatteryWarningScreen(int battery_percentage)
+{
+    // 1. Clear Framebuffer to White
+    memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
+    
+    // 2. Draw warning border (thick lines around edge)
+    for (int i = 0; i < 10; i++) {
+        epd_draw_hline(0, i, SCREEN_W, COLOR_BLACK, framebuffer);
+        epd_draw_hline(0, SCREEN_H - 1 - i, SCREEN_W, COLOR_BLACK, framebuffer);
+        epd_draw_vline(i, 0, SCREEN_H, COLOR_BLACK, framebuffer);
+        epd_draw_vline(SCREEN_W - 1 - i, 0, SCREEN_H, COLOR_BLACK, framebuffer);
+    }
+    
+    // 3. Draw WARNING title
+    int title_x = SCREEN_W / 2 - 150;
+    int title_y = 80;
+    drawTextHelper(title_x, title_y, "! WARNING !", &FiraSans);
+    
+    // 4. Draw battery icon (simple rectangle)
+    int batt_x = SCREEN_W / 2 - 60;
+    int batt_y = 200;
+    epd_draw_rect(batt_x, batt_y, 120, 80, COLOR_BLACK, framebuffer);
+    
+    // 5. Draw percentage inside battery icon
+    char pct_str[8];
+    sprintf(pct_str, "%d%%", battery_percentage);
+    int pct_x = batt_x + 35;
+    int pct_y = batt_y + 55;
+    drawTextHelper(pct_x, pct_y, pct_str, &FiraSans);
+    
+    // 6. Draw main warning message
+    int msg1_y = 350;
+    drawTextHelper(100, msg1_y, "Battery Level Critical!", &FiraSans);
+    
+    int msg2_y = 420;
+    drawTextHelper(120, msg2_y, "Please charge the device", &FiraSans);
+    
+    int msg3_y = 490;
+    drawTextHelper(150, msg3_y, "immediately.", &FiraSans);
 }
 
 // Draw a large temperature using custom bitmaps
@@ -358,11 +401,29 @@ void updateUI(WeatherData data)
     // 1. Clear Framebuffer to White
     memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
 
-    // 2. Draw Static Lines
-    drawForecastGridLines();
+    // 2. Get Battery Percentage
+    int battery_percentage = getBatteryPercentage();
+    Serial.printf("Battery: %d%%\n", battery_percentage);
 
-    // 3. Draw Battery (Helper from ui_layout.cpp)
-    drawBattery();
+    // 3. Check if battery is critically low (< 3%)
+    if (battery_percentage < 3)
+    {
+        // Show low battery warning screen instead of weather
+        drawBatteryWarningScreen(battery_percentage);
+        
+        // 4. Flush to Screen
+        Serial.println("Updating Display (Low Battery Warning)...");
+        epd_poweron();
+        epd_clear();
+        epd_draw_grayscale_image(epd_full_screen(), framebuffer);
+        epd_poweroff();
+        Serial.println("Display Update Done.");
+        return;  // Exit early, don't show weather data
+    }
+
+    // 4. Draw Static Lines and Battery (normal flow)
+    drawForecastGridLines();
+    drawBattery(battery_percentage);
 
     if (!data.valid)
     {
@@ -372,7 +433,7 @@ void updateUI(WeatherData data)
     else
     {
         // --- PREPARE LEFT PANEL STRINGS ---
-        char windStr[32], dewStr[32], cloudStr[32], rainStr[32], dateStr[64];
+        static char windStr[32], dewStr[32], cloudStr[32], rainStr[32], dateStr[64];
 
         sprintf(windStr, "%.0f km/h Wind", data.current.windSpeed60);
         sprintf(dewStr, "%.0f°C Taupunkt", data.current.dew_point);
