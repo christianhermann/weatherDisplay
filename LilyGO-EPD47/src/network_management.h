@@ -35,4 +35,7 @@ struct WeatherData
 // Function prototypes
 WeatherData fetchWeatherData();
 
+inline bool isSentinel(float val) { return val <= -90.0f; }
+inline bool isSentinel(int val) { return val <= -90; }
+
 #endif

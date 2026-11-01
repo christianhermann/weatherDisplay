@@ -2,14 +2,14 @@
 import logging
 import sys
 
-from importWeatherData import (
+from weather_api import (
     fetch_current_weather,
     parse_current_to_point,
     fetch_forecast_window,
     pick_target_forecasts,
 )
 
-from exportWeatherData import publish_weather_data 
+from mqtt_publisher import publish_weather_data 
 
 LAT = 48.17
 LON = 11.53

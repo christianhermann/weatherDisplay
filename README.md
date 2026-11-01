@@ -227,16 +227,17 @@ weatherDisplay/
 │ │ └── createHeaders.py # Generates C header files from images
 │ │
 │ └── WeatherData/ # Weather fetching & MQTT publishing
-│ ├── main.py # Main entry point for weather fetch script
-│ ├── exportWeatherData.py # Fetches data from BrightSky API
-│ ├── importWeatherData.py # Publishes JSON to MQTT broker
-│ └── .env # MQTT credentials
+│     ├── main.py # Main entry point for weather fetch script
+│     ├── weather_api.py # Fetches data from BrightSky API
+│     ├── mqtt_publisher.py # Publishes JSON to MQTT broker
+│     └── .env # MQTT credentials
 └── LilyGo-EPD47/ # ESP32 firmware
 └── src/
   ├── main.cpp # Entry point, setup, loop & deep sleep
   ├── network_management.cpp # WiFi, MQTT subscribe & JSON parsing
   ├── network_management.h # Weather data structs & prototypes
   ├── ui_layout.cpp # E-Ink drawing functions
+  ├── ui_layout.h # E-Ink UI public interface
   ├── weather_icons.h # Icon bitmaps
   ├── icon_display.h # Icon lookup helpers
   ├── firasans.h # FiraSans font
@@ -259,7 +260,7 @@ weatherDisplay/
 ### Workflow
 
 1. **Icon Processing:** `addPadding.py` → `convertToGrayscale.py` → `createHeaders.py` → `weather_icons.h`
-2. **Data Pipeline:** `exportWeatherData.py` → `importWeatherData.py` → MQTT Broker → ESP32
+2. **Data Pipeline:** `weather_api.py` → `mqtt_publisher.py` → MQTT Broker → ESP32
 3. **Display Update:** ESP32 wakes → fetches MQTT → `ui_layout.cpp` renders → deep sleep
 
 ---

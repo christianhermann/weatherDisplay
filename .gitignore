@@ -1,4 +1,6 @@
 .env
-LilyGO-EPD47/scr/secrets.h
+**/.env
 secrets.h
-scr/secrets.h
+**/secrets.h
+LilyGO-EPD47/src/secrets.h
+src/secrets.h

@@ -6,7 +6,7 @@ from dataclasses import asdict
 from typing import List
 from dotenv import load_dotenv
 from datetime import datetime
-from importWeatherData import WeatherPoint
+from weather_api import WeatherPoint
 
 # --- Configuration ---
 load_dotenv() 

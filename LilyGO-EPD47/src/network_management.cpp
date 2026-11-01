@@ -25,22 +25,82 @@ bool messageReceived = false;
 // HELPERS
 // ---------------------------------------------------------
 
+// --- RTC Variables for Fast Reconnect ---
+RTC_DATA_ATTR int32_t rtc_channel = 0;
+RTC_DATA_ATTR bool rtc_channel_valid = false;
+
+// --- Static IP Configuration ---
+static const IPAddress STATIC_IP(192, 168, 178, 55);
+static const IPAddress GATEWAY(192, 168, 178, 1);
+static const IPAddress SUBNET(255, 255, 255, 0);
+static const IPAddress DNS_SERVER(192, 168, 178, 1);
+
 void connectWiFi()
 {
-    Serial.printf("Connecting to %s", WIFI_SSID);
     WiFi.mode(WIFI_STA);
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
-
-    int retries = 0;
-    int delay_ms = 250;
-    while (WiFi.status() != WL_CONNECTED && retries < 12)
+    WiFi.setTxPower(WIFI_POWER_11dBm); // 11dBm reduces peak radio current by ~30-40% while maintaining reliable LAN coverage
+    if (!WiFi.config(STATIC_IP, GATEWAY, SUBNET, DNS_SERVER))
     {
-        delay(delay_ms);
-        Serial.print(".");
-        delay_ms = (int)fmin(delay_ms * 1.5, 1000);
-        retries++;
+        Serial.println("Static IP configuration failed!");
     }
-    Serial.println(WiFi.status() == WL_CONNECTED ? " OK" : " Failed");
+
+    bool connected = false;
+
+    // 1. Fast Reconnect using cached Channel
+    // Specifying channel avoids scanning all 13 channels (~300ms vs ~2.5s).
+    // We avoid locking to a strict BSSID MAC because mesh APs and Fritz!Boxes
+    // frequently reject direct BSSID association or steer across nodes.
+    if (rtc_channel_valid && rtc_channel > 0 && rtc_channel <= 13)
+    {
+        Serial.printf("Fast connecting to %s (Ch %d)...", WIFI_SSID, rtc_channel);
+        WiFi.begin(WIFI_SSID, WIFI_PASS, rtc_channel);
+
+        int fast_retries = 0;
+        while (WiFi.status() != WL_CONNECTED && fast_retries < 25)
+        {
+            delay(100);
+            Serial.print(".");
+            fast_retries++;
+        }
+
+        if (WiFi.status() == WL_CONNECTED)
+        {
+            connected = true;
+            Serial.println(" OK (Fast)");
+        }
+        else
+        {
+            Serial.println(" Failed, falling back to full scan.");
+            rtc_channel_valid = false;
+            WiFi.disconnect(true);
+            delay(150); // Let ESP32 WiFi task settle after disconnect
+        }
+    }
+
+    // 2. Normal Scan Fallback
+    if (!connected)
+    {
+        Serial.printf("Connecting to %s (Full scan)...", WIFI_SSID);
+        WiFi.begin(WIFI_SSID, WIFI_PASS);
+
+        int retries = 0;
+        int delay_ms = 250;
+        while (WiFi.status() != WL_CONNECTED && retries < 15)
+        {
+            delay(delay_ms);
+            Serial.print(".");
+            delay_ms = (int)fmin(delay_ms * 1.3, 1000);
+            retries++;
+        }
+        Serial.println(WiFi.status() == WL_CONNECTED ? " OK" : " Failed");
+    }
+
+    // 3. Cache Channel for subsequent wakeups
+    if (WiFi.status() == WL_CONNECTED)
+    {
+        rtc_channel = WiFi.channel();
+        rtc_channel_valid = true;
+    }
 }
 
 // Helper to safely extract nullable fields
@@ -122,6 +182,7 @@ WeatherData parseJson(char *json)
 
     data.current.temp = cur["temp"] | -99.0;
     data.current.rain = cur["rain"] | -99.0;
+    data.current.rain_probability = cur["rain_probability"] | -99;
     data.current.cloudCover = cur["cloudco"] | -99;
     data.current.windSpeed60 = cur["wind60"] | -99.0;
     data.current.dew_point = cur["dew_point"] | -99.0;
@@ -217,11 +278,10 @@ WeatherData fetchWeatherData()
         DEBUG_NET.printf(">> Subscribing to: %s\n", MQTT_TOPIC);
         client.subscribe(MQTT_TOPIC);
 
-        // 3. Wait Loop
+        // 3. Wait Loop (Tight 2ms polling)
         DEBUG_NET.println(">> Waiting for message...");
         long start = millis();
-        int timeout = 1000;  // Reduced from 1500ms for faster power efficiency
-        int delay_interval = 10;  // Start with 5ms
+        int timeout = 3000;  // 3000ms gives adequate headroom for network/broker jitter
         while (millis() - start < timeout)
         {
             client.loop();
@@ -230,8 +290,7 @@ WeatherData fetchWeatherData()
                 DEBUG_NET.println(">> Message flag set!");
                 break;
             }
-            delay(delay_interval);
-            delay_interval = (delay_interval < 50) ? delay_interval + 2 : 50;  // Gradual backoff
+            delay(2);
         }
 
         if (!messageReceived)

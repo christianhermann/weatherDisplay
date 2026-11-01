@@ -6,21 +6,17 @@
 #define SLEEP_MINUTES_SHORT 60
 
 
-// Declare the external UI function (defined in ui_layout.cpp)
-extern void updateUI(WeatherData data);
+#include "ui_layout.h"
 
 // Force external declaration to debug linking
 uint8_t *framebuffer = NULL;
 
+// RTC memory variables
+RTC_DATA_ATTR char last_update_ts[32] = {0};
+
 // ---------------------------------------------------------
-// HELPER: GET ADAPTIVE SLEEP DURATION
+// HELPER: GET ADAPTIVE SLEEP DURATION (FALLBACK)
 // ---------------------------------------------------------
-// Returns sleep duration in minutes based on current hour
-// Schedule:
-//   00:00 - 06:00: 120 minutes (sleep period)
-//   06:00 - 08:00: 60 minutes (wake-up)
-//   08:00 - 12:00: 120 minutes (mid-morning)
-//   12:00 - 24:00: 60 minutes (active)
 uint32_t getSleepDurationMinutes(int hour)
 {
     if (hour >= 0 && hour < 6) {
@@ -35,9 +31,86 @@ uint32_t getSleepDurationMinutes(int hour)
 }
 
 // ---------------------------------------------------------
+// HELPER: CHRONO-SYNCED DEEP SLEEP CALCULATION
+// ---------------------------------------------------------
+// Sleep continuously from 00:00 to 05:02.
+// During daytime, dynamically wake up at :02 past the next hour.
+uint64_t calculateSleepDurationUs(const WeatherData &weather)
+{
+    // Default fallback: 1 hour (3600 seconds)
+    const int DEFAULT_SLEEP_SEC = 3600;
+    int sleep_seconds = DEFAULT_SLEEP_SEC;
+
+    if (weather.valid && strlen(weather.current.timestamp) >= 16)
+    {
+        // Validate digit characters for HH and MM
+        if (isdigit(weather.current.timestamp[11]) && isdigit(weather.current.timestamp[12]) &&
+            isdigit(weather.current.timestamp[14]) && isdigit(weather.current.timestamp[15]))
+        {
+            // ISO format: "YYYY-MM-DDTHH:MM:SS" or "YYYY-MM-DDTHH:MM"
+            char hBuf[3] = { weather.current.timestamp[11], weather.current.timestamp[12], '\0' };
+            char mBuf[3] = { weather.current.timestamp[14], weather.current.timestamp[15], '\0' };
+            int hour = atoi(hBuf);
+            int minute = atoi(mBuf);
+            int second = 0;
+            if (strlen(weather.current.timestamp) >= 19 && weather.current.timestamp[16] == ':' &&
+                isdigit(weather.current.timestamp[17]) && isdigit(weather.current.timestamp[18]))
+            {
+                char sBuf[3] = { weather.current.timestamp[17], weather.current.timestamp[18], '\0' };
+                second = atoi(sBuf);
+            }
+
+            // Boundary validation for hour, minute, second
+            if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59 && second >= 0 && second <= 59)
+            {
+                // Night Window: 00:00 to 05:02 (strictly hour >= 0 && hour < 5)
+                // Wakes up continuously at 05:02:00
+                if (hour >= 0 && hour < 5)
+                {
+                    int target_seconds = 5 * 3600 + 2 * 60; // 18120s (05:02:00)
+                    int current_seconds = hour * 3600 + minute * 60 + second;
+                    sleep_seconds = target_seconds - current_seconds;
+                    if (sleep_seconds < 60) sleep_seconds += 3600;
+                    Serial.printf("Night sleep scheduled until 05:02: %d seconds (%d min)\n", sleep_seconds, sleep_seconds / 60);
+                }
+                else
+                {
+                    // Daytime Window (05:00 to 23:59): chrono-sync to :02 past the NEXT hour
+                    // For hourly observations (minute = 0), sleeps (62 - 0)*60 = 3720s (62 min)
+                    // At 23:00, (62 - 0)*60 = 3720s targets 00:02:00, which then triggers the 5h night sleep.
+                    sleep_seconds = (62 - minute) * 60 - second;
+                    if (sleep_seconds < 60) sleep_seconds += 3600;
+                    Serial.printf("Daytime chrono-sync scheduled to :02: %d seconds (%d min)\n", sleep_seconds, sleep_seconds / 60);
+                }
+            }
+            else
+            {
+                Serial.println("Timestamp hour/minute out of range; using fallback sleep.");
+                sleep_seconds = DEFAULT_SLEEP_SEC;
+            }
+        }
+        else
+        {
+            Serial.println("Malformed timestamp characters; using fallback sleep.");
+            sleep_seconds = DEFAULT_SLEEP_SEC;
+        }
+    }
+    else
+    {
+        Serial.println("Invalid weather data timestamp; using fallback 3600s sleep.");
+    }
+
+    // Strict RTC hardware limit clamp: prevent underflow, zero, or multi-year sleep bricking
+    if (sleep_seconds < 60) sleep_seconds = DEFAULT_SLEEP_SEC;
+    if (sleep_seconds > 86400) sleep_seconds = DEFAULT_SLEEP_SEC;
+
+    return (uint64_t)sleep_seconds * 1000000ULL;
+}
+
+// ---------------------------------------------------------
 // HELPER: DEBUG PRINT
 // ---------------------------------------------------------
-void printWeatherDebug(WeatherData data)
+void printWeatherDebug(const WeatherData &data)
 {
     Serial.println("\n--------------------------------------");
     Serial.println("       WEATHER DATA REPORT");
@@ -83,7 +156,8 @@ void printWeatherDebug(WeatherData data)
 
 void setup()
 {   // 0. Set CPU Frequency to 80MHz (Default is 240MHz on ESP32-S3) to reduce power consumption. EPD updates are slow, so we don't need the extra speed.
-    setCpuFrequencyMhz(80); 
+    // Set CPU Frequency to 160MHz for "race-to-sleep": finishes Wi-Fi & rendering faster
+    setCpuFrequencyMhz(160); 
     // Disable Bluetooth to free up memory and reduce power consumption
     btStop();
 
@@ -91,40 +165,28 @@ void setup()
     Serial.begin(115200);
 #endif
 
-    // 1. Init PSRAM
-    if (!psramInit())
+    // 1. Battery voltage check BEFORE Wi-Fi or EPD initialization
+    int battery = getBatteryPercentage();
+    if (battery < 5)
     {
-        Serial.println("PSRAM Init Failed");
-        while (1)
-            ;
+        Serial.printf("Battery critical (%d%%). Drawing warning and sleeping permanently.\n", battery);
+        if (psramInit())
+        {
+            framebuffer = (uint8_t *)ps_calloc(sizeof(uint8_t), EPD_WIDTH * EPD_HEIGHT / 2);
+            if (framebuffer)
+            {
+                epd_init();
+                drawBatteryWarningScreen(battery);
+                epd_poweron();
+                epd_clear();
+                epd_draw_grayscale_image(epd_full_screen(), framebuffer);
+                epd_poweroff_all();
+            }
+        }
+        // Permanent deep sleep without timer wakeup
+        esp_deep_sleep_start();
     }
 
-    // 2. Allocate Framebuffer
-    // EPD_WIDTH (960) * EPD_HEIGHT (540) / 2 = 259,200 bytes
-    framebuffer = (uint8_t *)ps_calloc(sizeof(uint8_t), EPD_WIDTH * EPD_HEIGHT / 2);
-    if (!framebuffer)
-    {
-        Serial.println("Alloc memory failed !!!");
-        while (1)
-            ;
-    }
-    // Initialize to White (0xFF = White in this 4bpp mode usually, or 0x00? Check demo)
-    // Usually 0xFF is White for EPD.
-    memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
-
-    // 2. Init EPD
-    epd_init();
-
-    // 3. CRITICAL CHECK: Is the global framebuffer actually set?
-    if (framebuffer == NULL)
-    {
-        Serial.println("!! FRAMEBUFFER IS NULL !!");
-        // This confirms the linker is using a different variable instance
-    }
-    else
-    {
-        Serial.printf("Framebuffer Address: %p\n", framebuffer);
-    }
     // 2. Fetch Weather Data
     // This will connect WiFi, get MQTT, parse JSON, and disconnect WiFi
     Serial.println("Fetching weather data...");
@@ -135,41 +197,90 @@ void setup()
     printWeatherDebug(weather);
 #endif
 
-    // 5. Run UI
+    // Handle failed data fetch gracefully without freezing or corrupting existing display
+    if (!weather.valid)
+    {
+        Serial.println("!! Weather data fetch failed !!");
+        if (strlen(last_update_ts) > 0)
+        {
+            // We already have valid weather data on the screen from a previous wake.
+            // Do NOT overwrite or corrupt the screen with "Waiting for Data...".
+            // Go to sleep for 2 minutes and retry promptly so the display doesn't stay frozen.
+            Serial.println("Preserving existing display on screen. Retrying in 2 minutes...");
+            esp_sleep_enable_timer_wakeup(120ULL * 1000000ULL);
+            esp_deep_sleep_start();
+        }
+        else
+        {
+            // First boot with no existing screen. Try initializing display to show status,
+            // but sleep only 60 seconds before retrying instead of 1 hour.
+            Serial.println("First boot fetch failed. Will retry in 60 seconds...");
+        }
+    }
+
+    // 4. Skip UI update if weather data is unchanged
+    if (weather.valid && strlen(last_update_ts) > 0 && strcmp(weather.update_ts, last_update_ts) == 0)
+    {
+        // Unchanged data is unlikely with regular backend publishing schedules,
+        // but better to have and not need than otherwise: skip expensive EPD update
+        // and return immediately to deep sleep to maximize battery life.
+        Serial.println("Weather data unchanged since last update. Skipping UI render.");
+        uint64_t sleep_us = calculateSleepDurationUs(weather);
+        esp_sleep_enable_timer_wakeup(sleep_us);
+        esp_deep_sleep_start();
+    }
+
+    if (weather.valid)
+    {
+        strlcpy(last_update_ts, weather.update_ts, sizeof(last_update_ts));
+    }
+
+    // 5. Init PSRAM
+    if (!psramInit())
+    {
+        Serial.println("PSRAM Init Failed");
+        esp_sleep_enable_timer_wakeup(60ULL * 1000000ULL);
+        esp_deep_sleep_start();
+    }
+
+    // 6. Allocate Framebuffer
+    // EPD_WIDTH (960) * EPD_HEIGHT (540) / 2 = 259,200 bytes
+    framebuffer = (uint8_t *)ps_calloc(sizeof(uint8_t), EPD_WIDTH * EPD_HEIGHT / 2);
+    if (!framebuffer)
+    {
+        Serial.println("Alloc memory failed !!!");
+        esp_sleep_enable_timer_wakeup(60ULL * 1000000ULL);
+        esp_deep_sleep_start();
+    }
+    // Initialize to White (0xFF = White in this 4bpp mode usually)
+    memset(framebuffer, 0xFF, EPD_WIDTH * EPD_HEIGHT / 2);
+
+    // 7. Init EPD
+    epd_init();
+
+    // 8. Run UI
     updateUI(weather);
 
     // --- DEEP SLEEP SEQUENCE ---
     Serial.println(" shutting down...");
 
     // A. Ensure EPD is off (Double check)
-    epd_poweroff();
+    epd_poweroff_all();
 
     // B. Delay slightly to let serial finish (optional)
     delay(50);
 
-    // C. Configure Timer Wakeup with adaptive interval
-    uint32_t sleep_minutes = SLEEP_MINUTES_SHORT;  // Default fallback
-    
-    // If we have valid weather data, calculate dynamic sleep interval based on current hour
-    if (weather.valid && strlen(weather.current.timestamp) >= 13)
+    // C. Configure Timer Wakeup with chrono-synced interval
+    uint64_t sleep_us = 0;
+    if (weather.valid)
     {
-        // Extract hour from ISO timestamp (format: "2026-02-01T15:30:00+01:00")
-        char hourStr[3];
-        hourStr[0] = weather.current.timestamp[11];
-        hourStr[1] = weather.current.timestamp[12];
-        hourStr[2] = '\0';
-        int current_hour = atoi(hourStr);
-        
-        sleep_minutes = getSleepDurationMinutes(current_hour);
-        Serial.printf("Adaptive sleep: Hour %d -> Sleep %d minutes\n", current_hour, sleep_minutes);
+        sleep_us = calculateSleepDurationUs(weather);
     }
     else
     {
-        Serial.printf("Using default sleep interval: %d minutes\n", SLEEP_MINUTES_SHORT);
+        // First boot failed fetch fallback: retry in 60s
+        sleep_us = 60ULL * 1000000ULL;
     }
-    
-    // Time in Microseconds = Minutes * 60 * 1,000,000
-    uint64_t sleep_us = (uint64_t)sleep_minutes * 60 * 1000000;
     esp_sleep_enable_timer_wakeup(sleep_us);
 
     // D. Enter Deep Sleep

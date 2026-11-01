@@ -22,14 +22,14 @@ const IconMap ICONS[] = {
     {"rain", rain_map},
     {"sleet", sleet_map},
     {"snow", snow_map},
-    {"sleet", sleet_map},
+    {"hail", hail_map},
     {"thunderstorm", thunderstorm_map},
     {"wind", wind_map},
     // ... Add all other icons here ...
     {NULL, NULL}};
 
 // Helper function to find icon data by name
-const uint8_t *getIconData(const char *name)
+inline const uint8_t *getIconData(const char *name)
 {
     if (!name)
         return NULL;
