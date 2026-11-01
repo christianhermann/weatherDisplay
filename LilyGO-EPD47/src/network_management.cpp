@@ -220,8 +220,8 @@ WeatherData fetchWeatherData()
         // 3. Wait Loop
         DEBUG_NET.println(">> Waiting for message...");
         long start = millis();
-        int timeout = 500;  // Reduced from 1500ms for faster power efficiency
-        int delay_interval = 5;  // Start with 5ms
+        int timeout = 1000;  // Reduced from 1500ms for faster power efficiency
+        int delay_interval = 10;  // Start with 5ms
         while (millis() - start < timeout)
         {
             client.loop();
